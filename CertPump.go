@@ -4,10 +4,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
+	"net"
 	"os"
 	"runtime"
+	"strings"
 	"time"
 
 	nats "github.com/nats-io/go-nats"
@@ -37,24 +40,38 @@ type response struct {
 	Error    string `json:"error,omitempty"`
 }
 
+var (
+	ErrIOTimeout           = errors.New("IO timeout")
+	ErrNoCertFound         = errors.New("no cert found")
+	ErrSelfSigned          = errors.New("x509: self signed cert")
+	ErrIncompleteCertChain = errors.New("x509: incomplete cert chain")
+	ErrInvalidCertHostname = errors.New("x509: invalid cert for hostname")
+)
+
 func getCert(hostname string, ip string, port int32) (*cert, error) {
 
 	address := fmt.Sprintf("%s:%d", ip, port)
 	conf := &tls.Config{
+
 		MinVersion:         tls.VersionSSL30,
 		MaxVersion:         tls.VersionTLS12,
 		InsecureSkipVerify: true,
 		ServerName:         hostname,
 	}
 
-	conn, err := tls.Dial("tcp", address, conf)
+	conn, err := tls.DialWithDialer(&net.Dialer{
+		Timeout: time.Duration(10) * time.Second,
+	}, "tcp", address, conf)
 	if err != nil {
+		if strings.Contains(err.Error(), "i/o timeout") {
+			err = ErrIOTimeout
+		}
 		return nil, err
 	}
 
 	tlsState := conn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
-		return nil, fmt.Errorf("no certificates found")
+		return nil, ErrNoCertFound
 	}
 	_c := tlsState.PeerCertificates[0]
 
@@ -91,10 +108,13 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 
 	if certerr != nil && len(tlsState.PeerCertificates) == 1 {
 		if tlsState.PeerCertificates[0].Issuer.CommonName == tlsState.PeerCertificates[0].Subject.CommonName {
-			certerr = fmt.Errorf("x509: self signed cert")
+			certerr = ErrSelfSigned
 		} else {
-			certerr = fmt.Errorf("x509: incomplete cert chain")
+			certerr = ErrIncompleteCertChain
 		}
+	}
+	if certerr != nil && strings.Contains(certerr.Error(), "x509: certificate is valid for ") {
+		certerr = ErrInvalidCertHostname
 	}
 
 	conn.Close()
