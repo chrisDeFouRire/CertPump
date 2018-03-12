@@ -4,13 +4,12 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"runtime"
-	"strings"
+	"strconv"
 	"time"
 
 	nats "github.com/nats-io/go-nats"
@@ -41,11 +40,7 @@ type response struct {
 }
 
 var (
-	ErrIOTimeout           = errors.New("IO timeout")
-	ErrNoCertFound         = errors.New("no cert found")
-	ErrSelfSigned          = errors.New("x509: self signed cert")
-	ErrIncompleteCertChain = errors.New("x509: incomplete cert chain")
-	ErrInvalidCertHostname = errors.New("x509: invalid cert for hostname")
+	timeoutsec int
 )
 
 func getCert(hostname string, ip string, port int32) (*cert, error) {
@@ -60,19 +55,13 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 	}
 
 	conn, err := tls.DialWithDialer(&net.Dialer{
-		Timeout: time.Duration(10) * time.Second,
+		Timeout: time.Duration(timeoutsec) * time.Second,
 	}, "tcp", address, conf)
 	if err != nil {
-		if strings.Contains(err.Error(), "i/o timeout") {
-			err = ErrIOTimeout
-		}
-		return nil, err
+		return nil, fmt.Errorf("certpump can't connect: %s", err.Error())
 	}
 
 	tlsState := conn.ConnectionState()
-	if len(tlsState.PeerCertificates) == 0 {
-		return nil, ErrNoCertFound
-	}
 	_c := tlsState.PeerCertificates[0]
 
 	names := _c.DNSNames
@@ -106,29 +95,16 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 
 	_, certerr := tlsState.PeerCertificates[0].Verify(opts)
 
-	if certerr != nil && len(tlsState.PeerCertificates) == 1 {
-		if tlsState.PeerCertificates[0].Issuer.CommonName == tlsState.PeerCertificates[0].Subject.CommonName {
-			certerr = ErrSelfSigned
-		} else {
-			certerr = ErrIncompleteCertChain
-		}
-	}
-	if certerr != nil && strings.Contains(certerr.Error(), "x509: certificate is valid for ") {
-		certerr = ErrInvalidCertHostname
-	}
-
 	conn.Close()
 	return c, certerr
 }
 
 func handleRequest(nc *nats.Conn, msg []byte, reply string) {
-	// don't let a panic crash the app or we'll crash all concurrent requests
-	/* Use DEV env var
 	defer func() {
 		if r := recover(); r != nil {
 			log.Println("Error recovered: ", r)
 		}
-	}() */
+	}()
 
 	req := request{}
 	jierr := json.Unmarshal(msg, &req)
@@ -145,6 +121,7 @@ func handleRequest(nc *nats.Conn, msg []byte, reply string) {
 	cert, err := getCert(req.Hostname, req.Host, req.Port)
 	if err != nil {
 		res.Error = err.Error()
+		log.Printf("%s:%d (%s) Error:%s\n", res.Hostname, res.Port, res.Host, res.Error)
 	}
 	if cert != nil {
 		res.Cert = *cert
@@ -154,7 +131,6 @@ func handleRequest(nc *nats.Conn, msg []byte, reply string) {
 	if joerr != nil {
 		log.Println("JSON response marshal Error: ", jierr.Error())
 	}
-	fmt.Println(string(bytes))
 	nc.Publish(reply, bytes)
 }
 
@@ -170,6 +146,16 @@ func main() {
 	natsChannel := os.Getenv("NATS_CHANNEL")
 	if natsChannel == "" {
 		natsChannel = "get.CERTPUMP.*"
+	}
+
+	if to, ok := os.LookupEnv("TIMEOUT_SEC"); ok {
+		if tos, err := strconv.Atoi(to); err != nil {
+			timeoutsec = tos
+		} else {
+			log.Fatalln("Can't parse TIMEOUT_SEC env var")
+		}
+	} else {
+		timeoutsec = 15
 	}
 
 	var nc *nats.Conn
@@ -192,7 +178,7 @@ func main() {
 		log.Fatalln(err.Error())
 	}
 
-	log.Println("CertPump Connected to Nats (", natsURL, ")")
+	log.Println("Connected to Nats (", natsURL, ")")
 
 	// subscribe and spawn a goroutine for each message
 	_, err = nc.QueueSubscribe(natsChannel, "certpump_group", func(msg *nats.Msg) {
