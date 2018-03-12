@@ -58,7 +58,7 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 		Timeout: time.Duration(timeoutsec) * time.Second,
 	}, "tcp", address, conf)
 	if err != nil {
-		return nil, fmt.Errorf("certpump can't connect: %s", err.Error())
+		return nil, fmt.Errorf("certpump connect: %s", err.Error())
 	}
 
 	tlsState := conn.ConnectionState()
@@ -94,6 +94,23 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 	}
 
 	_, certerr := tlsState.PeerCertificates[0].Verify(opts)
+
+	/*
+		CODE TO PERFORM HTTP HEAD
+		if certerr == nil {
+			tr := &http.Transport{
+				DialTLS: func(network, addr string) (net.Conn, error) {
+					return conn, nil
+				},
+			}
+			client := &http.Client{Transport: tr}
+			url := fmt.Sprintf("https://%s:%d/", hostname, port)
+			resp, err := client.Head(url)
+			if err != nil {
+				fmt.Println("http error", err.Error())
+			}
+			fmt.Println("response code: ", hostname, resp.StatusCode)
+		}*/
 
 	conn.Close()
 	return c, certerr
@@ -145,7 +162,7 @@ func main() {
 
 	natsChannel := os.Getenv("NATS_CHANNEL")
 	if natsChannel == "" {
-		natsChannel = "get.CERTPUMP.*"
+		natsChannel = "get.CERT.*"
 	}
 
 	if to, ok := os.LookupEnv("TIMEOUT_SEC"); ok {
