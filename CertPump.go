@@ -148,7 +148,7 @@ func pumpCert(req request) *response {
 		if strings.Contains(certerr.Error(), "x509: certificate is valid for ") {
 			return res.failed(ErrInvalidCertHostname)
 		}
-		return res.failed(ExternalError{Code: "ERROR", Message: certerr.Error()})
+		return res.failed(ExternalError{Code: "CERTERROR", Message: certerr.Error()})
 	}
 
 	for _, each := range verified {
