@@ -9,7 +9,7 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"strconv"
+	"strings"
 	"time"
 
 	nats "github.com/nats-io/go-nats"
@@ -25,58 +25,85 @@ type cert struct {
 	Chain              []string `json:"chain"`
 }
 
-type request struct {
-	Hostname string `json:"hostname"`
-	Host     string `json:"host"`
-	Port     int32  `json:"port"`
-}
-
-type response struct {
-	Hostname string `json:"hostname"`
-	Host     string `json:"host"`
-	Port     int32  `json:"port"`
-	Cert     cert   `json:"cert"`
-	Error    string `json:"error,omitempty"`
-}
-
-var (
-	timeoutsec int
-)
-
-func getCert(hostname string, ip string, port int32) (*cert, error) {
-
-	address := fmt.Sprintf("%s:%d", ip, port)
-	conf := &tls.Config{
-
-		MinVersion:         tls.VersionSSL30,
-		MaxVersion:         tls.VersionTLS12,
-		InsecureSkipVerify: true,
-		ServerName:         hostname,
-	}
-
-	conn, err := tls.DialWithDialer(&net.Dialer{
-		Timeout: time.Duration(timeoutsec) * time.Second,
-	}, "tcp", address, conf)
-	if err != nil {
-		return nil, fmt.Errorf("certpump connect: %s", err.Error())
-	}
-
-	tlsState := conn.ConnectionState()
-	_c := tlsState.PeerCertificates[0]
-
+func NewCert(_c *x509.Certificate) *cert {
 	names := _c.DNSNames
 	if len(names) == 0 {
 		names = append(names, _c.Subject.CommonName)
 	}
 
-	c := &cert{
+	return &cert{
 		DNSnames:           names,
 		Issuer:             _c.Issuer.CommonName,
 		NotBefore:          _c.NotBefore.Format(time.RFC1123Z),
 		NotAfter:           _c.NotAfter.Format(time.RFC1123Z),
 		SerialNumber:       _c.SerialNumber.Text(16),
 		SignatureAlgorithm: _c.SignatureAlgorithm.String(),
-		Chain:              nil,
+	}
+}
+
+type request struct {
+	Hostname   string `json:"hostname"`
+	Host       string `json:"host"`
+	Port       int32  `json:"port"`
+	TimeoutSec int32  `json:"timeout"`
+}
+
+type response struct {
+	Hostname string         `json:"hostname"`
+	Host     string         `json:"host"`
+	Port     int32          `json:"port"`
+	Certs    [][]cert       `json:"cert"`
+	Error    *ExternalError `json:"error,omitempty"`
+}
+
+type ExternalError struct {
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+func NewExternalError(err error) *ExternalError {
+	return &ExternalError{Code: "ERROR", Message: err.Error()}
+}
+func (e ExternalError) Error() string {
+	return e.Message
+}
+
+var (
+	ErrIOTimeout           = ExternalError{Code: "ETIMEOUT", Message: "IO timeout"}
+	ErrNoCertFound         = ExternalError{Code: "NOCERT", Message: "no cert found"}
+	ErrSelfSigned          = ExternalError{Code: "SELFSIGNED", Message: "x509: self signed cert"}
+	ErrIncompleteCertChain = ExternalError{Code: "INCOMPLETECERTCHAIN", Message: "x509: incomplete cert chain"}
+	ErrInvalidCertHostname = ExternalError{Code: "INVALIDHOSTNAME", Message: "x509: invalid cert for hostname"}
+)
+
+func getCert(req request) ([][]cert, *ExternalError) {
+	timeoutsec := req.TimeoutSec
+	if timeoutsec == 0 {
+		timeoutsec = 10
+	}
+
+	address := fmt.Sprintf("%s:%d", req.Host, req.Port)
+	conf := &tls.Config{
+
+		MinVersion:         tls.VersionSSL30,
+		MaxVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true,
+		ServerName:         req.Hostname,
+	}
+
+	conn, err := tls.DialWithDialer(&net.Dialer{
+		Timeout: time.Duration(timeoutsec) * time.Second,
+	}, "tcp", address, conf)
+	if err != nil {
+		if strings.Contains(err.Error(), "i/o timeout") {
+			return nil, &ErrIOTimeout
+		}
+		return nil, &ExternalError{Code: "CONNECTERROR", Message: err.Error()}
+	}
+
+	tlsState := conn.ConnectionState()
+	if len(tlsState.PeerCertificates) == 0 {
+		return nil, &ErrNoCertFound
 	}
 
 	opts := x509.VerifyOptions{
@@ -85,15 +112,44 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 		DNSName:       conf.ServerName,
 		Intermediates: x509.NewCertPool(),
 	}
+	var allcerts []cert
 	for i, cert := range tlsState.PeerCertificates {
-		c.Chain = append(c.Chain, cert.Subject.CommonName)
+		c := NewCert(cert)
+		allcerts = append(allcerts, *c)
+
 		if i == 0 {
 			continue
 		}
 		opts.Intermediates.AddCert(cert)
 	}
 
-	_, certerr := tlsState.PeerCertificates[0].Verify(opts)
+	res, certerr := tlsState.PeerCertificates[0].Verify(opts)
+
+	if certerr != nil {
+		var result [][]cert
+		result = append(result, allcerts)
+
+		if len(tlsState.PeerCertificates) == 1 {
+			if tlsState.PeerCertificates[0].Issuer.CommonName == tlsState.PeerCertificates[0].Subject.CommonName {
+				return result, &ErrSelfSigned
+			}
+			return result, &ErrIncompleteCertChain
+
+		}
+		if strings.Contains(certerr.Error(), "x509: certificate is valid for ") {
+			return result, &ErrInvalidCertHostname
+		}
+	}
+
+	var chains [][]cert
+	for _, each := range res {
+		var chain []cert
+		for _, _c := range each {
+			c := NewCert(_c)
+			chain = append(chain, *c)
+		}
+		chains = append(chains, chain)
+	}
 
 	/*
 		CODE TO PERFORM HTTP HEAD
@@ -113,15 +169,10 @@ func getCert(hostname string, ip string, port int32) (*cert, error) {
 		}*/
 
 	conn.Close()
-	return c, certerr
+	return chains, nil
 }
 
 func handleRequest(nc *nats.Conn, msg []byte, reply string) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Println("Error recovered: ", r)
-		}
-	}()
 
 	req := request{}
 	jierr := json.Unmarshal(msg, &req)
@@ -134,15 +185,12 @@ func handleRequest(nc *nats.Conn, msg []byte, reply string) {
 		Host:     req.Host,
 		Port:     req.Port,
 	}
-
-	cert, err := getCert(req.Hostname, req.Host, req.Port)
+	chains, err := getCert(req)
 	if err != nil {
-		res.Error = err.Error()
+		res.Error = err
 		log.Printf("%s:%d (%s) Error:%s\n", res.Hostname, res.Port, res.Host, res.Error)
 	}
-	if cert != nil {
-		res.Cert = *cert
-	}
+	res.Certs = chains
 
 	bytes, joerr := json.Marshal(res)
 	if joerr != nil {
@@ -163,16 +211,6 @@ func main() {
 	natsChannel := os.Getenv("NATS_CHANNEL")
 	if natsChannel == "" {
 		natsChannel = "get.CERT.*"
-	}
-
-	if to, ok := os.LookupEnv("TIMEOUT_SEC"); ok {
-		if tos, err := strconv.Atoi(to); err != nil {
-			timeoutsec = tos
-		} else {
-			log.Fatalln("Can't parse TIMEOUT_SEC env var")
-		}
-	} else {
-		timeoutsec = 15
 	}
 
 	var nc *nats.Conn

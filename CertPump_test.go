@@ -19,7 +19,7 @@ func TestSSLping(t *testing.T) {
 		Port:     443,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*100)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -35,7 +35,7 @@ func TestSSLping(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if res.Error != "" {
+	if res.Error != nil {
 		t.Fatal("Error not nil", res.Error)
 	}
 }
@@ -50,7 +50,7 @@ func TestPlacenames(t *testing.T) {
 		Port:     443,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*100)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -66,7 +66,7 @@ func TestPlacenames(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if res.Error != "" {
+	if res.Error != nil {
 		t.Fatal("Error not nil", res.Error)
 	}
 }
@@ -81,7 +81,7 @@ func TestFail1(t *testing.T) {
 		Port:     443,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*100)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -97,10 +97,10 @@ func TestFail1(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if len(res.Cert.Chain) != 1 {
-		t.Fatal("Not one cert in chain")
+	if len(res.Certs) != 1 {
+		t.Fatal("Not one cert chain but ", len(res.Certs))
 	}
-	if res.Error != ErrIncompleteCertChain.Error() {
+	if res.Error.Code != ErrIncompleteCertChain.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
@@ -114,7 +114,7 @@ func TestFail2(t *testing.T) {
 		Port:     995,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*100)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -130,10 +130,10 @@ func TestFail2(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if len(res.Cert.Chain) != 1 {
-		t.Fatal("Not one cert in chain")
+	if len(res.Certs) != 1 {
+		t.Fatal("Not one cert chain")
 	}
-	if res.Error != ErrSelfSigned.Error() {
+	if res.Error.Code != ErrSelfSigned.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
@@ -148,7 +148,7 @@ func TestFail3(t *testing.T) {
 		Port:     443,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*100)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -164,10 +164,10 @@ func TestFail3(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if len(res.Cert.Chain) != 1 {
-		t.Fatal("Not one cert in chain")
+	if len(res.Certs) != 1 {
+		t.Fatal("Not one cert chain")
 	}
-	if res.Error != ErrSelfSigned.Error() {
+	if res.Error.Code != ErrSelfSigned.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
@@ -182,7 +182,7 @@ func TestFail4(t *testing.T) {
 		Port:     443,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*100)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -198,7 +198,7 @@ func TestFail4(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if res.Error != ErrInvalidCertHostname.Error() {
+	if res.Error.Code != ErrInvalidCertHostname.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
@@ -208,18 +208,19 @@ func TestFail5(t *testing.T) {
 	nc, _ = nats.Connect("nats://localhost:4222")
 
 	req := request{
-		Hostname: "sslping.com",
-		Host:     "195.154.227.44",
-		Port:     4000,
+		Hostname:   "sslping.com",
+		Host:       "195.154.227.44",
+		Port:       4000,
+		TimeoutSec: 2,
 	}
 	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERTPUMP.US", bytes, time.Second*50)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*50)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
-
+	fmt.Println(string(msg.Data))
 	if res.Host != req.Host {
 		t.Fatal("Host changed")
 	}
@@ -229,7 +230,7 @@ func TestFail5(t *testing.T) {
 	if res.Hostname != req.Hostname {
 		t.Fatal("Hostname changed")
 	}
-	if res.Error != ErrIOTimeout.Error() {
+	if res.Error.Code != ErrIOTimeout.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
