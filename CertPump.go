@@ -54,6 +54,12 @@ type response struct {
 	Port     int32          `json:"port"`
 	Certs    [][]cert       `json:"cert"`
 	Error    *ExternalError `json:"error,omitempty"`
+	Duration float64        `json:"duration"`
+}
+
+func (r *response) failed(err ExternalError) *response {
+	r.Error = &err
+	return r
 }
 
 type ExternalError struct {
@@ -76,10 +82,12 @@ var (
 	ErrInvalidCertHostname = ExternalError{Code: "INVALIDHOSTNAME", Message: "x509: invalid cert for hostname"}
 )
 
-func getCert(req request) ([][]cert, *ExternalError) {
-	timeoutsec := req.TimeoutSec
-	if timeoutsec == 0 {
-		timeoutsec = 10
+func pumpCert(req request) *response {
+
+	res := &response{
+		Hostname: req.Hostname,
+		Host:     req.Host,
+		Port:     req.Port,
 	}
 
 	address := fmt.Sprintf("%s:%d", req.Host, req.Port)
@@ -92,18 +100,18 @@ func getCert(req request) ([][]cert, *ExternalError) {
 	}
 
 	conn, err := tls.DialWithDialer(&net.Dialer{
-		Timeout: time.Duration(timeoutsec) * time.Second,
+		Timeout: time.Duration(req.TimeoutSec) * time.Second,
 	}, "tcp", address, conf)
 	if err != nil {
 		if strings.Contains(err.Error(), "i/o timeout") {
-			return nil, &ErrIOTimeout
+			return res.failed(ErrIOTimeout)
 		}
-		return nil, &ExternalError{Code: "CONNECTERROR", Message: err.Error()}
+		return res.failed(ExternalError{Code: "CONNECTERROR", Message: err.Error()})
 	}
 
 	tlsState := conn.ConnectionState()
 	if len(tlsState.PeerCertificates) == 0 {
-		return nil, &ErrNoCertFound
+		return res.failed(ErrNoCertFound)
 	}
 
 	opts := x509.VerifyOptions{
@@ -123,32 +131,33 @@ func getCert(req request) ([][]cert, *ExternalError) {
 		opts.Intermediates.AddCert(cert)
 	}
 
-	res, certerr := tlsState.PeerCertificates[0].Verify(opts)
+	verified, certerr := tlsState.PeerCertificates[0].Verify(opts)
 
 	if certerr != nil {
 		var result [][]cert
 		result = append(result, allcerts)
+		res.Certs = result
 
 		if len(tlsState.PeerCertificates) == 1 {
 			if tlsState.PeerCertificates[0].Issuer.CommonName == tlsState.PeerCertificates[0].Subject.CommonName {
-				return result, &ErrSelfSigned
+				return res.failed(ErrSelfSigned)
 			}
-			return result, &ErrIncompleteCertChain
+			return res.failed(ErrIncompleteCertChain)
 
 		}
 		if strings.Contains(certerr.Error(), "x509: certificate is valid for ") {
-			return result, &ErrInvalidCertHostname
+			return res.failed(ErrInvalidCertHostname)
 		}
+		return res.failed(ExternalError{Code: "ERROR", Message: certerr.Error()})
 	}
 
-	var chains [][]cert
-	for _, each := range res {
+	for _, each := range verified {
 		var chain []cert
 		for _, _c := range each {
 			c := NewCert(_c)
 			chain = append(chain, *c)
 		}
-		chains = append(chains, chain)
+		res.Certs = append(res.Certs, chain)
 	}
 
 	/*
@@ -169,34 +178,33 @@ func getCert(req request) ([][]cert, *ExternalError) {
 		}*/
 
 	conn.Close()
-	return chains, nil
+	return res
 }
 
 func handleRequest(nc *nats.Conn, msg []byte, reply string) {
 
+	before := time.Now()
 	req := request{}
 	jierr := json.Unmarshal(msg, &req)
 	if jierr != nil {
-		log.Println("JSON request unmarshal Error: ", jierr.Error())
+		log.Println("JSON request unmarshal: ", jierr.Error())
 	}
-
-	res := response{
-		Hostname: req.Hostname,
-		Host:     req.Host,
-		Port:     req.Port,
+	if req.TimeoutSec <= 0 {
+		req.TimeoutSec = 10
 	}
-	chains, err := getCert(req)
-	if err != nil {
-		res.Error = err
-		log.Printf("%s:%d (%s) Error:%s\n", res.Hostname, res.Port, res.Host, res.Error)
+	res := pumpCert(req)
+	if res.Error != nil {
+		log.Printf("%s:%d (%s) Error:%s (%s)\n", res.Hostname, res.Port, res.Host, res.Error.Message, res.Error.Code)
 	}
-	res.Certs = chains
-
+	res.Duration = time.Now().Sub(before).Seconds()
 	bytes, joerr := json.Marshal(res)
 	if joerr != nil {
 		log.Println("JSON response marshal Error: ", jierr.Error())
 	}
-	nc.Publish(reply, bytes)
+	puberr := nc.Publish(reply, bytes)
+	if puberr != nil {
+		log.Println("pub: ", puberr)
+	}
 }
 
 func main() {
@@ -241,7 +249,7 @@ func main() {
 	})
 
 	if err != nil {
-		log.Println("Error: Can't subscribe to nats")
+		log.Println("Error: Can't subscribe to ", natsChannel)
 		log.Fatalln(err.Error())
 	}
 	runtime.Goexit()
