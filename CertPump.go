@@ -25,7 +25,7 @@ type cert struct {
 	Chain              []string `json:"chain"`
 }
 
-func NewCert(_c *x509.Certificate) *cert {
+func newCert(_c *x509.Certificate) *cert {
 	names := _c.DNSNames
 	if len(names) == 0 {
 		names = append(names, _c.Subject.CommonName)
@@ -62,23 +62,26 @@ func (r *response) failed(err ExternalError) *response {
 	return r
 }
 
+// ExternalError reprents an error as sent in json
 type ExternalError struct {
 	Code    string `json:"code,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
-func NewExternalError(err error) *ExternalError {
-	return &ExternalError{Code: "ERROR", Message: err.Error()}
-}
 func (e ExternalError) Error() string {
 	return e.Message
 }
 
 var (
-	ErrIOTimeout           = ExternalError{Code: "ETIMEOUT", Message: "IO timeout"}
-	ErrNoCertFound         = ExternalError{Code: "NOCERT", Message: "no cert found"}
-	ErrSelfSigned          = ExternalError{Code: "SELFSIGNED", Message: "x509: self signed cert"}
+	// ErrIOTimeout if a timeout occurs
+	ErrIOTimeout = ExternalError{Code: "ETIMEOUT", Message: "IO timeout"}
+	//ErrNoCertFound if no cert is found with TLS
+	ErrNoCertFound = ExternalError{Code: "NOCERT", Message: "no cert found"}
+	// ErrSelfSigned if cert is self signed
+	ErrSelfSigned = ExternalError{Code: "SELFSIGNED", Message: "x509: self signed cert"}
+	// ErrIncompleteCertChain if some certs are missing
 	ErrIncompleteCertChain = ExternalError{Code: "INCOMPLETECERTCHAIN", Message: "x509: incomplete cert chain"}
+	// ErrInvalidCertHostname if the host name doesn't match
 	ErrInvalidCertHostname = ExternalError{Code: "INVALIDHOSTNAME", Message: "x509: invalid cert for hostname"}
 )
 
@@ -122,7 +125,7 @@ func pumpCert(req request) *response {
 	}
 	var allcerts []cert
 	for i, cert := range tlsState.PeerCertificates {
-		c := NewCert(cert)
+		c := newCert(cert)
 		allcerts = append(allcerts, *c)
 
 		if i == 0 {
@@ -154,7 +157,7 @@ func pumpCert(req request) *response {
 	for _, each := range verified {
 		var chain []cert
 		for _, _c := range each {
-			c := NewCert(_c)
+			c := newCert(_c)
 			chain = append(chain, *c)
 		}
 		res.Certs = append(res.Certs, chain)
