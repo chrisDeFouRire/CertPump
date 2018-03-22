@@ -25,7 +25,7 @@ func TestSSLping(t *testing.T) {
 	}
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
-
+	fmt.Println(string(msg.Data))
 	if res.Host != req.Host {
 		t.Fatal("Host changed")
 	}
@@ -251,7 +251,7 @@ func TestFail6(t *testing.T) {
 	}
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
-	fmt.Println(string(msg.Data))
+	t.Fatal(string(msg.Data))
 	if res.Host != req.Host {
 		t.Fatal("Host changed")
 	}
