@@ -234,3 +234,34 @@ func TestFail5(t *testing.T) {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
+func TestFail6(t *testing.T) {
+	var nc *nats.Conn
+	nc, _ = nats.Connect("nats://localhost:4222")
+
+	req := request{
+		Hostname:   "www.efficioconsulting.com",
+		Host:       "176.58.127.96",
+		Port:       443,
+		TimeoutSec: 10,
+	}
+	bytes, _ := json.Marshal(req)
+	msg, err := nc.Request("get.CERT.US", bytes, time.Second*50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := response{}
+	json.Unmarshal(msg.Data, &res)
+	fmt.Println(string(msg.Data))
+	if res.Host != req.Host {
+		t.Fatal("Host changed")
+	}
+	if res.Port != req.Port {
+		t.Fatal("Port changed")
+	}
+	if res.Hostname != req.Hostname {
+		t.Fatal("Hostname changed")
+	}
+	if res.Error != nil {
+		t.Fatal("Error detected", res.Error)
+	}
+}

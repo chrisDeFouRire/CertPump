@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/sha1"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -21,8 +22,7 @@ type cert struct {
 	SignatureAlgorithm string   `json:"signatureAlgorithm"`
 	NotBefore          string   `json:"notBefore"`
 	NotAfter           string   `json:"notAfter"`
-	SerialNumber       string   `json:"serialNumber"`
-	Chain              []string `json:"chain"`
+	SHA1               string   `json:"sha1"`
 }
 
 func newCert(_c *x509.Certificate) *cert {
@@ -31,14 +31,15 @@ func newCert(_c *x509.Certificate) *cert {
 		names = append(names, _c.Subject.CommonName)
 	}
 
-	return &cert{
+	res := &cert{
 		DNSnames:           names,
 		Issuer:             _c.Issuer.CommonName,
 		NotBefore:          _c.NotBefore.Format(time.RFC1123Z),
 		NotAfter:           _c.NotAfter.Format(time.RFC1123Z),
-		SerialNumber:       _c.SerialNumber.Text(16),
 		SignatureAlgorithm: _c.SignatureAlgorithm.String(),
+		SHA1:               fmt.Sprintf("%x", sha1.Sum(_c.Raw)),
 	}
+	return res
 }
 
 type request struct {
