@@ -2,7 +2,6 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -21,49 +20,50 @@ func ensureServiceInvariant(t *testing.T, req request, res response) {
 	}
 }
 
-func TestSSLping(t *testing.T) {
+func send(t *testing.T, req request) (*response, error) {
 	var nc *nats.Conn
 	nc, _ = nats.Connect("nats://localhost:4222")
 
-	req := request{
-		Hostname: "sslping.com",
-		Host:     "195.154.227.44",
-		Port:     443,
-	}
 	bytes, _ := json.Marshal(req)
 	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
-		fmt.Println(err)
+		return nil, err
 	}
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
-	// fmt.Println(string(msg.Data))
 
 	ensureServiceInvariant(t, req, res)
 
+	return &res, nil
+}
+
+func sendRequest(t *testing.T, hostname string, host string, port int32) (*response, error) {
+	req := request{
+		Hostname: hostname,
+		Host:     host,
+		Port:     port,
+	}
+	return send(t, req)
+}
+
+func TestSSLping(t *testing.T) {
+	res, err := sendRequest(t, "sslping.com", "195.154.227.44", 443)
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	if res.Error != nil {
-		t.Fatal("Error not nil", res.Error)
+		t.Error("Error not nil", res.Error)
 	}
 }
 
 func TestPlacenames(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
+	res, err := sendRequest(t, "www.placenames.com", "104.28.13.117", 443)
 
-	req := request{
-		Hostname: "www.placenames.com",
-		Host:     "104.28.13.117",
-		Port:     443,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-
-	ensureServiceInvariant(t, req, res)
 
 	if res.Error != nil {
 		t.Fatal("Error not nil", res.Error)
@@ -71,23 +71,11 @@ func TestPlacenames(t *testing.T) {
 }
 
 func TestFail1(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
+	res, err := sendRequest(t, "monitoring.meshwith.me", "64.140.158.156", 443)
 
-	req := request{
-		Hostname: "monitoring.meshwith.me",
-		Host:     "64.140.158.156",
-		Port:     443,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-
-	ensureServiceInvariant(t, req, res)
 
 	if len(res.Certs) != 1 {
 		t.Fatal("Not one cert chain but ", len(res.Certs))
@@ -97,23 +85,11 @@ func TestFail1(t *testing.T) {
 	}
 }
 func TestFail2(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
+	res, err := sendRequest(t, "mail.farelogix.com", "72.46.248.210", 995)
 
-	req := request{
-		Hostname: "mail.farelogix.com",
-		Host:     "72.46.248.210",
-		Port:     995,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-
-	ensureServiceInvariant(t, req, res)
 
 	if len(res.Certs) != 1 {
 		t.Fatal("Not one cert chain")
@@ -124,23 +100,11 @@ func TestFail2(t *testing.T) {
 }
 
 func TestFail3(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
+	res, err := sendRequest(t, "clickholdings.co.uk", "77.72.203.173", 443)
 
-	req := request{
-		Hostname: "clickholdings.co.uk",
-		Host:     "77.72.203.173",
-		Port:     443,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-
-	ensureServiceInvariant(t, req, res)
 
 	if len(res.Certs) != 1 {
 		t.Fatal("Not one cert chain")
@@ -151,23 +115,10 @@ func TestFail3(t *testing.T) {
 }
 
 func TestFail4(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
-
-	req := request{
-		Hostname: "incorrecthostname.com",
-		Host:     "195.154.227.44",
-		Port:     443,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*100)
+	res, err := sendRequest(t, "incorrecthostname.com", "195.154.227.44", 443)
 	if err != nil {
-		fmt.Println(err)
+		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-
-	ensureServiceInvariant(t, req, res)
 
 	if res.Error.Code != ErrInvalidCertHostname.Code {
 		t.Fatal("Error not detected", res.Error)
@@ -175,48 +126,33 @@ func TestFail4(t *testing.T) {
 }
 
 func TestFail5(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
 
-	req := request{
-		Hostname:   "sslping.com",
-		Host:       "195.154.227.44",
-		Port:       4000,
-		TimeoutSec: 2,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*50)
+	res, err := send(t, request{"sslping.com", "195.154.227.44", 4000, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-	fmt.Println(string(msg.Data))
-	ensureServiceInvariant(t, req, res)
 
 	if res.Error.Code != ErrIOTimeout.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
 }
-func TestFail6(t *testing.T) {
-	var nc *nats.Conn
-	nc, _ = nats.Connect("nats://localhost:4222")
 
-	req := request{
-		Hostname:   "www.efficioconsulting.com",
-		Host:       "176.58.127.96",
-		Port:       443,
-		TimeoutSec: 10,
-	}
-	bytes, _ := json.Marshal(req)
-	msg, err := nc.Request("get.CERT.US", bytes, time.Second*50)
+func TestFail6(t *testing.T) {
+	res, err := send(t, request{"telefoot-01.xtralife.me", "188.166.85.124", 443, 10})
 	if err != nil {
 		t.Fatal(err)
 	}
-	res := response{}
-	json.Unmarshal(msg.Data, &res)
-	//t.Fatal(string(msg.Data))
-	ensureServiceInvariant(t, req, res)
+
+	if res.Error != nil {
+		t.Fatal("Error detected", res.Error)
+	}
+}
+
+func TestFail7(t *testing.T) {
+	res, err := send(t, request{"www.efficioconsulting.com", "176.58.127.96", 443, 10})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if res.Error != nil {
 		t.Fatal("Error detected", res.Error)
