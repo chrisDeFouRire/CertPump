@@ -9,6 +9,18 @@ import (
 	nats "github.com/nats-io/go-nats"
 )
 
+func ensureServiceInvariant(t *testing.T, req request, res response) {
+	if res.Host != req.Host {
+		t.Fatal("Host changed")
+	}
+	if res.Port != req.Port {
+		t.Fatal("Port changed")
+	}
+	if res.Hostname != req.Hostname {
+		t.Fatal("Hostname changed")
+	}
+}
+
 func TestSSLping(t *testing.T) {
 	var nc *nats.Conn
 	nc, _ = nats.Connect("nats://localhost:4222")
@@ -25,16 +37,10 @@ func TestSSLping(t *testing.T) {
 	}
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
-	fmt.Println(string(msg.Data))
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	// fmt.Println(string(msg.Data))
+
+	ensureServiceInvariant(t, req, res)
+
 	if res.Error != nil {
 		t.Fatal("Error not nil", res.Error)
 	}
@@ -57,15 +63,8 @@ func TestPlacenames(t *testing.T) {
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
 
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	ensureServiceInvariant(t, req, res)
+
 	if res.Error != nil {
 		t.Fatal("Error not nil", res.Error)
 	}
@@ -76,8 +75,8 @@ func TestFail1(t *testing.T) {
 	nc, _ = nats.Connect("nats://localhost:4222")
 
 	req := request{
-		Hostname: "ems.med.unsw.edu.au",
-		Host:     "149.171.203.11",
+		Hostname: "monitoring.meshwith.me",
+		Host:     "64.140.158.156",
 		Port:     443,
 	}
 	bytes, _ := json.Marshal(req)
@@ -88,15 +87,8 @@ func TestFail1(t *testing.T) {
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
 
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	ensureServiceInvariant(t, req, res)
+
 	if len(res.Certs) != 1 {
 		t.Fatal("Not one cert chain but ", len(res.Certs))
 	}
@@ -121,15 +113,8 @@ func TestFail2(t *testing.T) {
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
 
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	ensureServiceInvariant(t, req, res)
+
 	if len(res.Certs) != 1 {
 		t.Fatal("Not one cert chain")
 	}
@@ -155,15 +140,8 @@ func TestFail3(t *testing.T) {
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
 
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	ensureServiceInvariant(t, req, res)
+
 	if len(res.Certs) != 1 {
 		t.Fatal("Not one cert chain")
 	}
@@ -189,15 +167,8 @@ func TestFail4(t *testing.T) {
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
 
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	ensureServiceInvariant(t, req, res)
+
 	if res.Error.Code != ErrInvalidCertHostname.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
@@ -221,15 +192,8 @@ func TestFail5(t *testing.T) {
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
 	fmt.Println(string(msg.Data))
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	ensureServiceInvariant(t, req, res)
+
 	if res.Error.Code != ErrIOTimeout.Code {
 		t.Fatal("Error not detected", res.Error)
 	}
@@ -251,16 +215,9 @@ func TestFail6(t *testing.T) {
 	}
 	res := response{}
 	json.Unmarshal(msg.Data, &res)
-	t.Fatal(string(msg.Data))
-	if res.Host != req.Host {
-		t.Fatal("Host changed")
-	}
-	if res.Port != req.Port {
-		t.Fatal("Port changed")
-	}
-	if res.Hostname != req.Hostname {
-		t.Fatal("Hostname changed")
-	}
+	//t.Fatal(string(msg.Data))
+	ensureServiceInvariant(t, req, res)
+
 	if res.Error != nil {
 		t.Fatal("Error detected", res.Error)
 	}

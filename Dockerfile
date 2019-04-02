@@ -1,11 +1,14 @@
-FROM golang:1.10-alpine3.7 as builder
-RUN apk update && apk add ca-certificates git && rm -rf /var/cache/apk/*
+FROM golang:1.12 as builder
+
+ENV GO111MODULE=on
 
 # setup the working directory
 WORKDIR /go/src/github.com/chrisDeFouRire/CertPump
+COPY go.sum go.mod ./
+RUN go mod download
+
 COPY . .
 
-RUN go get github.com/nats-io/go-nats
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o CertPump ./CertPump.go
 
 # use a minimal alpine image
